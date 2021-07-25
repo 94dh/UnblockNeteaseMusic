@@ -9,13 +9,6 @@ on:
   push:
     branches: [ enhanced ]
 
-env:
-  # Use docker.io for Docker Hub if empty
-  REGISTRY: registry.cn-hangzhou.aliyuncs.com
-  # github.repository as <account>/<repo>
-  IMAGE_NAME: registry.cn-hangzhou.aliyuncs.com/dianhsu/unblock-netease-music
-
-
 jobs:
   build:
 
@@ -36,7 +29,6 @@ jobs:
         run: |
           echo "${ALIYUN_DOCKER_PASSWORD}" | docker login --username "${ALIYUN_DOCKER_USERNAME}" registry.cn-hongkong.aliyuncs.com --password-stdin
       - name: Docker build image and push on master branch
-        if: github.ref == 'refs/heads/master'
         run: |
           docker buildx build --output "type=image,push=true" --platform=linux/amd64,linux/arm/v7,linux/arm64,linux/386 --tag registry.cn-hangzhou.aliyuncs.com/dianhsu/unblock-netease-music:latest .
           
