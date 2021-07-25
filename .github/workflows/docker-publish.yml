@@ -1,0 +1,53 @@
+name: Docker
+
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+on:
+  push:
+    branches: [ enhanced ]
+
+env:
+  # Use docker.io for Docker Hub if empty
+  REGISTRY: registry.cn-hangzhou.aliyuncs.com
+  # github.repository as <account>/<repo>
+  IMAGE_NAME: registry.cn-hangzhou.aliyuncs.com/dianhsu/unblock-netease-music
+
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # Login against a Docker registry except on PR
+      # https://github.com/docker/login-action
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@28218f9b04b4f3f62068d7b6ce6ca5b26e35336c
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker login
+        env:
+          ALIYUN_DOCKER_USERNAME: ${{ secrets.ALIYUN_DOCKER_USERNAME }}
+          ALIYUN_DOCKER_PASSWORD: ${{ secrets.ALIYUN_DOCKER_PASSWORD }}
+        run: |
+          echo "${ALIYUN_DOCKER_PASSWORD}" | docker login --username "${ALIYUN_DOCKER_USERNAME}" registry.cn-hongkong.aliyuncs.com --password-stdin
+      - name: Docker build image and push on master branch
+        if: github.ref == 'refs/heads/master'
+        run: |
+          docker buildx build --output "type=image,push=true" --platform=linux/amd64,linux/arm/v7,linux/arm64,linux/386 --tag registry.cn-hangzhou.aliyuncs.com/dianhsu/unblock-netease-music:latest .
+          
