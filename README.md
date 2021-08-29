@@ -8,13 +8,26 @@ fork 自 [nondanee 的原版](https://github.com/nondanee/UnblockNeteaseMusic)�
 
 ## 特性
 
-- 使用 Bilibili / QQ / 百度 / 酷狗 / 酷我 / 咪咕 / JOOX 音源替换变灰歌曲链接 (默认仅启用一、二、五、六)
-- 为请求增加 `X-Real-IP` 参数解锁海外限制，支持指定网易云服务器 IP，支持设置上游 HTTP / HTTPS 代理
-- 完整的流量代理功能 (HTTP / HTTPS)，可直接作为系统代理 (同时支持 PAC)
+-   使用 Bilibili / QQ / ~~百度~~ / 酷狗 / 酷我 / 咪咕 / JOOX / Youtube 等音源替换变灰歌曲链接 (默认仅启用四、五、六、八)
+-   为请求增加 `X-Real-IP` 参数解锁海外限制，支持指定网易云服务器 IP，支持设置上游 HTTP / HTTPS 代理
+-   完整的流量代理功能 (HTTP / HTTPS)，可直接作为系统代理 (同时支持 PAC)
 
 ## 运行
 
-### docker 作法
+### 直接打開可执行文件
+
+去右侧的 Releases 找到最新版本，然后在下方的 Assets 找到符合你系统架构的可执行文件。下載回來後点两下即可使用。
+
+> macOS 因为签名问题，暂时不提供可执行文件。请先按照其他做法使用。
+
+### Docker 作法
+
+#### Docker Hub
+
+见 [pan93412/unblock-netease-music-enhanced](https://hub.docker.com/repository/docker/pan93412/unblock-netease-music-enhanced)
+。`latest` 是从 `enhanced` 组建的最新版本；`release` 是最新 tag 的版本。
+
+#### 自行编译
 
 ```bash
 git clone https://github.com/1715173329/UnblockNeteaseMusic
@@ -29,6 +42,14 @@ git clone https://github.com/1715173329/UnblockNeteaseMusic
 cd UnblockNeteaseMusic
 node app.js # 建议使用 screen / tmux 把 app.js 挂后台
 ```
+
+### Android Xposed 模块
+
+请移步至 [杜比大喇叭 β 版](https://github.com/nining377/dolby_beta)。
+
+### OpenWrt LuCI 插件
+
+请移步至 [luci-app-unblockneteasemusic](https://github.com/immortalwrt/luci-app-unblockneteasemusic)。
 
 ### 配置参数
 
@@ -54,20 +75,22 @@ optional arguments:
 
 ### 环境变量
 
-| 变量名称    	| 类型 	| 描述                            	| 示例                      	|
-|-------------	|------	|---------------------------------	|---------------------------	|
-| ENABLE_FLAC 	| bool 	| 启用/禁用无损音质获取           	| `ENABLE_FLAC=true`        	|
-| MIGU_COOKIE 	| str  	| 咪咕音源的 aversionid cookie    	|                           	|
-| QQ_COOKIE   	| str  	| QQ 音源的 uin & qm_keyst cookie 	|                           	|
-| YOUTUBE_KEY 	| str  	| Youtube 音源的 Data API v3 Key  	|                           	|
-| SIGN_CERT   	| path 	| 自定义证书文件                  	| `SIGN_CERT="./ca.crt"`    	|
-| SIGN_KEY    	| path 	| 自定义密钥文件                  	| `SIGN_KEY="./server.key"` 	|
+| 变量名称    | 类型 | 描述                                   | 示例                                                             |
+| ----------- | ---- | -------------------------------------- | ---------------------------------------------------------------- |
+| ENABLE_FLAC | bool | 启用/禁用无损音质获取                  | `ENABLE_FLAC=true`                                               |
+| MIN_BR      | int  | 允许的最低源音质，小于该值将被替换     | `MIN_BR=320000`                                                  |
+| MIGU_COOKIE | str  | 咪咕音源的 aversionid cookie           | `MIGU_COOKIE="<your_aversionid>"`                                |
+| QQ_COOKIE   | str  | QQ 音源的 uin 和 qm_keyst cookie       | `QQ_COOKIE="uin=<your_uin>; qm_keyst=<your_qm_keyst>"`           |
+| JOOX_COOKIE | str  | JOOX 音源的 wmid 和 session_key cookie | `JOOX_COOKIE="wmid=<your_wmid>; session_key=<your_session_key>"` |
+| YOUTUBE_KEY | str  | Youtube 音源的 Data API v3 Key         | `YOUTUBE_KEY="<your_data_api_key>"`                              |
+| SIGN_CERT   | path | 自定义证书文件                         | `SIGN_CERT="./ca.crt"`                                           |
+| SIGN_KEY    | path | 自定义密钥文件                         | `SIGN_KEY="./server.key"`                                        |
 
 ## 使用
 
 **警告**：本项目不提供线上 demo，请不要轻易信任使用他人提供的公开代理服务，以免发生安全问题
 
-**若将服务部署到公网，强烈建议使用严格模式 (此模式下仅放行网易云音乐所属域名的请求) `-s`  限制代理范围 (需使用 PAC 或 hosts)，~~或启用 Proxy Authentication `-t <name>:<password>` 设置代理用户名密码~~ (目前密码认证在 Windows 客户端设置和 macOS 系统设置都无法生效，请不要使用)，以防代理被他人滥用**
+**若将服务部署到公网，强烈建议使用严格模式 (此模式下仅放行网易云音乐所属域名的请求) `-s` 限制代理范围 (需使用 PAC 或 hosts)，~~或启用 Proxy Authentication `-t <name>:<password>` 设置代理用户名密码~~ (目前密码认证在 Windows 客户端设置和 macOS 系统设置都无法生效，请不要使用)，以防代理被他人滥用**
 
 支持 Windows 客户端，UWP 客户端，Android 客户端，Linux 客户端 (1.2 版本以上需要自签证书 MITM，启动客户端需要增加 `--ignore-certificate-errors` 参数)，macOS 客户端 (726 版本以上需要自签证书)，iOS 客户端 (配置 https endpoint 或使用自签证书) 和网页版 (需要自签证书，需要脚本配合)
 
@@ -100,29 +123,29 @@ PAC 自动代理脚本地址 `http://<Server Name:PORT>/proxy.pac`
 
 全局代理地址填写服务器地址和端口号即可
 
-| 平台    | 基础设置 |
-| :------ | :------------------------------- |
-| Windows | 设置 > 工具 > 自定义代理 (客户端内) |
+| 平台    | 基础设置                              |
+| :------ | :------------------------------------ |
+| Windows | 设置 > 工具 > 自定义代理 (客户端内)   |
 | UWP     | Windows 设置 > 网络和 Internet > 代理 |
-| Linux   | 系统设置 > 网络 > 网络代理 |
-| macOS   | 系统偏好设置 > 网络 > 高级 > 代理 |
-| Android | WLAN > 修改网络 > 高级选项 > 代理 |
-| iOS     | 无线局域网 > HTTP 代理 > 配置代理 |
+| Linux   | 系统设置 > 网络 > 网络代理            |
+| macOS   | 系统偏好设置 > 网络 > 高级 > 代理     |
+| Android | WLAN > 修改网络 > 高级选项 > 代理     |
+| iOS     | 无线局域网 > HTTP 代理 > 配置代理     |
 
 > 代理工具和方法有很多请自行探索，欢迎在 issues 讨论
 
-### ✳方法 3. 调用接口
+### ✳ 方法 3. 调用接口
 
 作为依赖库使用
 
 ```javascript
-const match = require('@1715173329/unblockneteasemusic')
+const match = require('@1715173329/unblockneteasemusic');
 
-/** 
+/**
  * Set proxy or hosts if needed
  */
-global.proxy = require('url').parse('http://127.0.0.1:1080')
-global.hosts = {'i.y.qq.com': '59.37.96.220'}
+global.proxy = require('url').parse('http://127.0.0.1:1080');
+global.hosts = { 'i.y.qq.com': '59.37.96.220' };
 
 /**
  * Find matching song from other platforms
@@ -130,7 +153,7 @@ global.hosts = {'i.y.qq.com': '59.37.96.220'}
  * @param {Array<String>||undefined} source support qq, xiami, baidu, kugou, kuwo, migu, joox
  * @return {Promise<Object>}
  */
-match(418602084, ['qq', 'kuwo', 'migu']).then(console.log)
+match(418602084, ['qq', 'kuwo', 'migu']).then(console.log);
 ```
 
 ## 效果

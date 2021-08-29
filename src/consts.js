@@ -1,4 +1,4 @@
-const DEFAULT_SOURCE = ['kuwo', 'migu', 'qq', 'youtube'];
+const DEFAULT_SOURCE = ['kugou', 'kuwo', 'migu', 'youtube'];
 const PROVIDERS = {
 	netease: require('./provider/netease'),
 	qq: require('./provider/qq'),
@@ -9,10 +9,10 @@ const PROVIDERS = {
 	joox: require('./provider/joox'),
 	youtube: require('./provider/youtube'),
 	bilibili: require('./provider/bilibili'),
-	pyncmd: require('./provider/pyncmd')
-}
+	pyncmd: require('./provider/pyncmd'),
+};
 
 module.exports = {
-    DEFAULT_SOURCE,
-    PROVIDERS,
+	DEFAULT_SOURCE,
+	PROVIDERS,
 };
