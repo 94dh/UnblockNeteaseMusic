@@ -1,4 +1,4 @@
-FROM node
+FROM node:alpine
 
 RUN set -ex && mkdir /app
 
