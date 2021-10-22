@@ -1,10 +1,18 @@
-const cache = require('./cache');
 const parse = require('url').parse;
 const crypto = require('./crypto');
 const request = require('./request');
 const match = require('./provider/match');
 const querystring = require('querystring');
 const { isHost } = require('./utilities');
+const { getManagedCacheStorage } = require('./cache');
+const { logScope } = require('./logger');
+
+const logger = logScope('hook');
+const cs = getManagedCacheStorage('hook');
+cs.aliveDuration = 7 * 24 * 60 * 60 * 1000;
+
+const ENABLE_LOCAL_VIP =
+	(process.env.ENABLE_LOCAL_VIP || '').toLowerCase() === 'true';
 
 const hook = {
 	request: {
@@ -161,7 +169,14 @@ hook.request.before = (ctx) => {
 						return pretendPlay(ctx);
 				}
 			})
-			.catch((error) => console.log(error, req.url));
+			.catch(
+				(error) =>
+					error &&
+					logger.error(
+						error,
+						`A error occurred in hook.request.before when hooking ${req.url}.`
+					)
+			);
 	} else if (
 		hook.target.host.has(url.hostname) &&
 		(url.path.startsWith('/weapi/') || url.path.startsWith('/api/'))
@@ -227,6 +242,31 @@ hook.request.after = (ctx) => {
 					netease.jsonBody = JSON.parse(
 						patch(crypto.eapi.decrypt(buffer).toString())
 					);
+					if (ENABLE_LOCAL_VIP) {
+						if (
+							netease.path === '/batch' ||
+							netease.path === '/api/batch'
+						) {
+							var info =
+								netease.jsonBody[
+									'/api/music-vip-membership/client/vip/info'
+								];
+							if (info) {
+								const expireTime = info.data.now + 31622400000;
+								info.data.redVipLevel = 7;
+								info.data.redVipAnnualCount = 1;
+
+								info.data.musicPackage.expireTime = expireTime;
+								info.data.musicPackage.vipCode = 230;
+
+								info.data.associator.expireTime = expireTime;
+
+								netease.jsonBody[
+									'/api/music-vip-membership/client/vip/info'
+								] = info;
+							}
+						}
+					}
 				}
 
 				if (
@@ -282,7 +322,14 @@ hook.request.after = (ctx) => {
 					? crypto.eapi.encrypt(Buffer.from(body))
 					: body;
 			})
-			.catch((error) => (error ? console.log(error, req.url) : null));
+			.catch(
+				(error) =>
+					error &&
+					logger.error(
+						error,
+						`A error occurred in hook.request.after when hooking ${req.url}.`
+					)
+			);
 	} else if (pkg) {
 		if (new Set([201, 301, 302, 303, 307, 308]).has(proxyRes.statusCode)) {
 			return request(
@@ -304,7 +351,7 @@ hook.connect.before = (ctx) => {
 			hook.target.host.has(host)
 		)
 	) {
-		if (url.port === 80) {
+		if (parseInt(url.port) === 80) {
 			req.url = `${global.address || 'localhost'}:${global.port[0]}`;
 			req.local = true;
 		} else if (global.port[1]) {
@@ -360,7 +407,7 @@ const tryCollect = (ctx) => {
 		.then((jsonBody) => {
 			netease.jsonBody = jsonBody;
 		})
-		.catch(() => {});
+		.catch((e) => e && logger.error(e));
 };
 
 const tryLike = (ctx) => {
@@ -392,7 +439,7 @@ const tryLike = (ctx) => {
 				netease.jsonBody = { code: 200, playlistId: pid };
 			}
 		})
-		.catch(() => {});
+		.catch((e) => e && logger.error(e));
 };
 
 const computeHash = (task) =>
@@ -401,7 +448,8 @@ const computeHash = (task) =>
 const tryMatch = (ctx) => {
 	const { req, netease } = ctx;
 	const { jsonBody } = netease;
-	const min_br = process.env.MIN_BR || 0;
+	/** @type {number} */
+	const min_br = Number(process.env.MIN_BR) || 0;
 	/** @type {Promise<any>[]} */
 	let tasks;
 	let target = 0;
@@ -495,15 +543,14 @@ const tryMatch = (ctx) => {
 						);
 						const os = header.os || cookie.os,
 							version = header.appver || cookie.appver;
-						if (os in limit && newer(limit[os], version))
-							return cache(
-								computeHash,
-								task,
-								7 * 24 * 60 * 60 * 1000
-							).then((value) => (item.md5 = value));
+						if (os in limit && newer(limit[os], version)) {
+							return cs
+								.cache(task, () => computeHash(task))
+								.then((value) => (item.md5 = value));
+						}
 					} catch (e) {}
 				})
-				.catch(() => {});
+				.catch((e) => e && logger.error(e));
 		} else if (item.code === 200 && netease.web) {
 			item.url = item.url.replace(
 				/(m\d+?)(?!c)\.music\.126\.net/,
@@ -531,11 +578,11 @@ const tryMatch = (ctx) => {
 			  ); // reduce time cost
 		tasks = jsonBody.data.map((item) => inject(item));
 	}
-	return Promise.all(tasks).catch(() => {});
+	return Promise.all(tasks).catch((e) => e && logger.error(e));
 };
 
 const unblockSoundEffects = (obj) => {
-	console.log('UNSE > triggered');
+	logger.debug('unblockSoundEffects() has been triggered.');
 	const { data, code } = obj;
 	if (code === 200) {
 		if (Array.isArray(data))

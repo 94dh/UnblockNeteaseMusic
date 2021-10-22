@@ -1,10 +1,8 @@
-#!/usr/bin/env node
-
-const package = require('../package.json');
+const packageJson = require('../package.json');
 const config = require('./cli.js')
 	.program({
-		name: package.name.replace(/@.+\//, ''),
-		version: package.version,
+		name: packageJson.name.replace(/@.+\//, ''),
+		version: packageJson.version,
 	})
 	.option(['-v', '--version'], { action: 'version' })
 	.option(['-p', '--port'], { metavar: 'port', help: 'specify server port' })
@@ -78,9 +76,12 @@ if (config.token && !/\S+:\S+/.test(config.token)) {
 	process.exit(1);
 }
 
+const { logScope } = require('./logger');
 const parse = require('url').parse;
 const hook = require('./hook');
 const server = require('./server');
+const { CacheStorageGroup } = require('./cache');
+const logger = logScope('app');
 const random = (array) => array[Math.floor(Math.random() * array.length)];
 const target = Array.from(hook.target.host);
 
@@ -128,10 +129,19 @@ const httpdns2 = (host) =>
 				.reduce((result, value) => result.concat(value.ip || []), [])
 		);
 
+// Allow enabling HTTPDNS queries with `ENABLE_HTTPDNS=true`
+// It seems broken - BETTER TO NOT ENABLE IT!
+const dnsSource =
+	process.env.ENABLE_HTTPDNS === 'true' ? [httpdns, httpdns2] : [];
+
+// Start the "Clean Cache" background task.
+const csgInstance = CacheStorageGroup.getInstance();
+setInterval(() => {
+	csgInstance.cleanup();
+}, 15 * 60 * 1000);
+
 Promise.all(
-	[httpdns, httpdns2]
-		.map((query) => query(target.join(',')))
-		.concat(target.map(dns))
+	dnsSource.map((query) => query(target.join(','))).concat(target.map(dns))
 )
 	.then((result) => {
 		const { host } = hook.target;
@@ -140,7 +150,7 @@ Promise.all(
 			Array.from(host).map(escape)
 		);
 		const log = (type) =>
-			console.log(
+			logger.info(
 				`${['HTTP', 'HTTPS'][type]} Server running @ http://${
 					address || '0.0.0.0'
 				}:${port[type]}`

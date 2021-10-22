@@ -1,10 +1,12 @@
-const cache = require('../cache');
 const request = require('../request');
+const { getManagedCacheStorage } = require('../cache');
 const parse = (query) =>
 	(query || '').split('&').reduce((result, item) => {
 		const splitItem = item.split('=').map(decodeURIComponent);
 		return Object.assign({}, result, { [splitItem[0]]: splitItem[1] });
 	}, {});
+
+const cs = getManagedCacheStorage('provider/youtube');
 
 // const proxy = require('url').parse('http://127.0.0.1:1080')
 const proxy = undefined;
@@ -79,41 +81,71 @@ const search = (info) => {
 };
 
 const track = (id) => {
-	const url =
-		'https://youtubei.googleapis.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
-	const json_header = { 'Content-Type': 'application/json; charset=utf-8' };
-	const json_body = `{
-		"context": {
-			"client": {
-				"hl": "en",
-				"clientName": "WEB",
-				"clientVersion": "2.20210721.00.00"
-			}
-		},
-		"videoId": "${id}"
-	}`;
+	/*
+	 * const url =
+	 * 	'https://youtubei.googleapis.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+	 * const json_header = { 'Content-Type': 'application/json; charset=utf-8' };
+	 * const json_body = `{
+	 * 	"context": {
+	 * 		"client": {
+	 * 			"hl": "en",
+	 * 			"clientName": "WEB",
+	 * 			"clientVersion": "2.20210721.00.00"
+	 * 		}
+	 * 	},
+	 * 	"videoId": "${id}"
+	 * }`;
+	 */
 
-	return request('POST', url, json_header, json_body, proxy)
-		.then((response) => response.body())
-		.then((body) => JSON.parse(body).streamingData)
-		.then((streamingData) => {
-			const stream = streamingData.formats
-				.concat(streamingData.adaptiveFormats)
-				.find((format) => format.itag === 140);
-			// .filter(format => [249, 250, 140, 251].includes(format.itag)) // NetaseMusic PC client do not support webm format
-			// .sort((a, b) => b.bitrate - a.bitrate)[0]
-			const target = parse(stream.signatureCipher);
-			return (
-				stream.url ||
-				(target.sp.includes('sig')
-					? cache(signature, undefined, 24 * 60 * 60 * 1000).then(
-							(sign) => target.url + '&sig=' + sign(target.s)
-					  )
-					: target.url)
-			);
-		});
+	const url = `https://www.youtube.com/watch?v=${id}`;
+	return (
+		// request('POST', url, json_header, json_body, proxy)
+		request('GET', url, {}, null, proxy)
+			.then((response) => response.body())
+			// .then((body) => JSON.parse(body).streamingData)
+			.then(
+				(body) =>
+					JSON.parse(
+						body
+							.match(
+								/ytInitialPlayerResponse\s*=\s*{[^]+};\s*var\s*meta/
+							)[0]
+							.replace(/;var meta/, '')
+							.replace(/ytInitialPlayerResponse = /, '')
+					).streamingData
+			)
+			.then((streamingData) => {
+				const stream = streamingData.formats
+					.concat(streamingData.adaptiveFormats)
+					.find((format) => format.itag === 140);
+				// .filter(format => [249, 250, 140, 251].includes(format.itag)) // NetaseMusic PC client do not support webm format
+				// .sort((a, b) => b.bitrate - a.bitrate)[0]
+				const target = parse(stream.signatureCipher);
+				return (
+					stream.url ||
+					(target.sp.includes('sig')
+						? cs
+								.cache(
+									'YOUTUBE_SIGNATURE',
+									() => signature(),
+									Date.now() + 24 * 60 * 60 * 1000
+								)
+								.then(
+									(sign) =>
+										target.url + '&sig=' + sign(target.s)
+								)
+						: target.url)
+				);
+			})
+	);
 };
 
-const check = (info) => cache(key ? apiSearch : search, info).then(track);
+const check = (info) =>
+	cs
+		.cache(info, () => {
+			if (key) return apiSearch(info);
+			return search(info);
+		})
+		.then(track);
 
 module.exports = { check, track };

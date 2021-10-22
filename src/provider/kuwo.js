@@ -1,8 +1,8 @@
-const cache = require('../cache');
 const insure = require('./insure');
 const select = require('./select');
 const crypto = require('../crypto');
 const request = require('../request');
+const { getManagedCacheStorage } = require('../cache');
 
 const format = (song) => ({
 	id: song.musicrid.split('_').pop(),
@@ -63,7 +63,12 @@ const search = (info) => {
 		)
 		.then((response) => response.json())
 		.then((jsonBody) => {
-			if (jsonBody && typeof jsonBody === "object" && "code" in jsonBody && jsonBody.code !== 200)
+			if (
+				jsonBody &&
+				typeof jsonBody === 'object' &&
+				'code' in jsonBody &&
+				jsonBody.code !== 200
+			)
 				return Promise.reject();
 			const list = jsonBody.data.list.map(format);
 			const matched = select(list, info);
@@ -95,6 +100,7 @@ const track = (id) => {
 		.catch(() => insure().kuwo.track(id));
 };
 
-const check = (info) => cache(search, info).then(track);
+const cs = getManagedCacheStorage('provider/kuwo');
+const check = (info) => cs.cache(info, () => search(info)).then(track);
 
 module.exports = { check, track };

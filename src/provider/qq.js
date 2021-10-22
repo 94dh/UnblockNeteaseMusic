@@ -1,7 +1,7 @@
-const cache = require('../cache');
 const insure = require('./insure');
 const select = require('./select');
 const request = require('../request');
+const { getManagedCacheStorage } = require('../cache');
 
 const headers = {
 	origin: 'http://y.qq.com/',
@@ -47,7 +47,7 @@ const single = (id, format) => {
 					module: 'vkey.GetVkeyServer',
 					method: 'CgiGetVkey',
 					param: {
-						guid: '7332953645',
+						guid: (Math.random() * 10000000).toFixed(0),
 						loginflag: 1,
 						filename: [format.join(id.file)],
 						songmid: [id.song],
@@ -90,6 +90,7 @@ const track = (id) => {
 		.catch(() => insure().qq.track(id));
 };
 
-const check = (info) => cache(search, info).then(track);
+const cs = getManagedCacheStorage('provider/qq');
+const check = (info) => cs.cache(info, () => search(info)).then(track);
 
 module.exports = { check, track };

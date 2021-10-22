@@ -4,11 +4,15 @@ on:
     push:
         branches:
             - 'enhanced'
-        paths-ignore:
-            - '**.md'
+        paths:
+            - '.github/workflows/push-docker.yml'
+            - 'precompiled/**'
+            - 'server.crt'
+            - 'server.key'
 
     release:
-        types: [published]
+        types:
+            - published
 
     # Allows you to run this workflow manually from the Actions tab
     workflow_dispatch:
@@ -51,6 +55,8 @@ jobs:
                   platforms: ${{ env.platforms }}
                   push: true
                   tags: ${{ env.image }}:${{ env.develop_tag }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
 
             - name: Build and push the released version
               uses: docker/build-push-action@v2
@@ -63,3 +69,5 @@ jobs:
                       ${{ env.image }}:${{ env.develop_tag }},
                       ${{ env.image }}:${{ env.released_tag }},
                       ${{ env.image }}:${{ steps.tagName.outputs.tag }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max

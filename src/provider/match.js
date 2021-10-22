@@ -1,94 +1,166 @@
-require('../polyfills');
-
 const find = require('./find');
 const request = require('../request');
-const consts = require('../consts');
+const {
+	PROVIDERS: providers,
+	DEFAULT_SOURCE: defaultSrc,
+} = require('../consts');
 const { isHostWrapper } = require('../utilities');
-const providers = consts.PROVIDERS;
-const defaultSrc = consts.DEFAULT_SOURCE;
+const SongNotAvailable = require('../exceptions/SongNotAvailable');
+const RequestFailed = require('../exceptions/RequestFailed');
+const IncompleteAudioData = require('../exceptions/IncompleteAudioData');
+const { logScope } = require('../logger');
+const RequestCancelled = require('../exceptions/RequestCancelled');
 
-const match = (id, source, data) => {
-	let meta = {};
+const logger = logScope('provider/match');
+
+/**
+ * Is this http request success?
+ *
+ * @param {number} code The HTTP status code.
+ */
+const isHttpResponseOk = (code) => code >= 200 && code <= 299;
+
+/** @type {Map<string, string>} */
+const headerReferer = new Map([
+	['bilivideo.com', 'https://www.bilibili.com/'],
+	['yt-download.org', 'https://www.yt-download.org/'],
+]);
+
+/**
+ * @typedef {{ size: number, br: number | null, url: string | null, md5: string | null }} AudioData
+ */
+
+/**
+ * Get the audio URL from the specified source.
+ *
+ * @param {string} source The source to fetch the audio URL.
+ * @param {Record<string, unknown>} info The music metadata from Netease Music.
+ * @return {Promise<AudioData>}
+ */
+async function getAudioFromSource(source, info) {
+	logger.debug({ source, info }, 'Getting the audio...');
+	// Check if this song is available in the specified source.
+	const audioData = await providers[source].check(info);
+	if (!audioData) throw new SongNotAvailable(source);
+
+	// Get the url from the song data.
+	const song = await check(audioData);
+	logger.debug(song, 'The matched song is:');
+	if (!song || typeof song.url !== 'string')
+		throw new IncompleteAudioData(
+			'song is undefined, or song.url is not a string.'
+		);
+
+	logger.debug({ source, info }, 'The audio matched!');
+	return song;
+}
+
+async function match(id, source, data) {
 	const candidate = (source || global.source || defaultSrc).filter(
 		(name) => name in providers
 	);
-	return find(id, data)
-		.then((info) => {
-			meta = info;
-			return Promise.any(
-				candidate.map(async (name) => {
-					try {
-						// Get the song data.
-						const audioData = await providers[name].check(info);
-						if (!audioData) return Promise.reject();
 
-						// Get the url of the song data.
-						const song = await check(audioData);
-						if (!song || typeof song.url !== 'string')
-							return Promise.reject();
+	const audioInfo = await find(id, data);
+	const audioData = await Promise.any(
+		candidate.map(async (source) =>
+			getAudioFromSource(source, audioInfo).catch((e) => {
+				if (e) {
+					if (e instanceof RequestCancelled) logger.debug(e);
+					else logger.error(e);
+				}
+				throw e; // We just log it instead of resolving it.
+			})
+		)
+	);
 
-						// We check if the song.url is reachable.
-						await request('GET', song.url);
-						// It will be thrown on failed.
-						return song;
-					} catch (e) {
-						if (e) console.warn(e);
-						return Promise.reject(); // .any will return the fulfilled one.
-					}
-				})
-			);
-		})
-		.then((song) => {
-			console.log(`[${meta.id}] ${meta.name}\n${song.url}`);
-			return song;
-		});
-};
+	const { id: audioId, name } = audioInfo;
+	const { url } = audioData;
+	logger.debug({ audioInfo, audioData }, 'The data to replace:');
+	logger.info(
+		{
+			audioId,
+			songName: name,
+			url,
+		},
+		`Replaced: [${audioId}] ${name}`
+	);
+	return audioData;
+}
 
-const check = (url) => {
-	const song = { size: 0, br: null, url: null, md5: null };
-	let header = { range: 'bytes=0-8191' };
+/**
+ * Check and get the audio info of URL.
+ * @param url The URL to be fetched.
+ * @return {Promise<AudioData>} The parsed audio data.
+ */
+async function check(url) {
 	const isHost = isHostWrapper(url);
+	const song = { size: 0, br: null, url: null, md5: null };
+	const header = {
+		range: 'bytes=0-8191',
+		'accept-encoding': 'identity',
+	};
 
-	if (isHost('bilivideo.com')) {
-		header.referer = 'https://www.bilibili.com/';
+	// Set the "Referer" header.
+	headerReferer.forEach((refererValue, urlPattern) => {
+		if (isHost(urlPattern)) header.referer = refererValue;
+	});
+
+	const response = await request('GET', url, header);
+	const {
+		/** @type {Record<string, string>} */
+		headers,
+	} = response;
+
+	// Check if this request success.
+	if (!isHttpResponseOk(response.statusCode))
+		throw new RequestFailed(url, response.statusCode);
+
+	// Set the URL of this song.
+	song.url = response.url.href;
+
+	// Get the bitrate of this song.
+	const data = await response.body(true);
+
+	try {
+		const bitrate = decode(data);
+		song.br = bitrate && !isNaN(bitrate) ? bitrate * 1000 : null;
+	} catch (e) {
+		logger.debug(e, 'Failed to decode and extract the bitrate');
 	}
 
-	return Promise.race([
-		request('GET', url, header),
-		new Promise((_, reject) => setTimeout(() => reject(504), 5 * 1000)),
-	])
-		.then((response) => {
-			if (!response.statusCode.toString().startsWith('2'))
-				return Promise.reject();
-			if (isHost('126.net'))
-				// song.md5 = response.headers['x-nos-meta-origin-md5'] || response.headers['etag'].replace(/"/g, '')
-				song.md5 = url.split('/').slice(-1)[0].replace(/\..*/g, '');
-			else if (isHost('qq.com'))
-				song.md5 = response.headers['server-md5'];
-			else if (isHost('qianqian.com'))
-				song.md5 = response.headers['etag']
-					.replace(/"/g, '')
-					.toLowerCase();
-			song.size =
-				parseInt(
-					(response.headers['content-range'] || '')
-						.split('/')
-						.pop() || response.headers['content-length']
-				) || 0;
-			song.url = response.url.href;
-			return response.headers['content-length'] === '8192'
-				? response.body(true)
-				: Promise.reject();
-		})
-		.then((data) => {
-			const bitrate = decode(data);
-			song.br = bitrate && !isNaN(bitrate) ? bitrate * 1000 : null;
-		})
-		.catch(() => {})
-		.then(() => song);
-};
+	// Check if "headers" existed. There are some edge cases
+	// that the response has no headers, for example, the song
+	// from YouTube.
+	if (headers) {
+		// Set the MD5 info of this song.
+		if (isHost('126.net'))
+			song.md5 = song.url.split('/').slice(-1)[0].replace(/\..*/g, '');
+		if (isHost('kuwo.cn') && song.br <= 320000)
+			song.md5 = headers['etag'].replace(/"/g, '');
+		if (isHost('qq.com')) song.md5 = headers['server-md5'];
 
-const decode = (buffer) => {
+		// Set the size info of this song.
+		song.size =
+			parseInt(
+				(headers['content-range'] || '').split('/').pop() ||
+					headers['content-length']
+			) || 0;
+
+		// Check if the Content-Length equals 8192.
+		if (
+			!isHost('yt-download.org') &&
+			headers['content-length'] !== '8192'
+		) {
+			// I'm not sure how to describe this.
+			// Seems like not important.
+			return Promise.reject();
+		}
+	}
+
+	return song;
+}
+
+function decode(buffer) {
 	const map = {
 		3: {
 			3: [
@@ -217,6 +289,6 @@ const decode = (buffer) => {
 		const bitrate = header[2] >> 4;
 		return map[version][layer][bitrate];
 	}
-};
+}
 
 module.exports = match;

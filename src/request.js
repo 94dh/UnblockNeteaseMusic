@@ -1,10 +1,15 @@
 const zlib = require('zlib');
 const http = require('http');
 const https = require('https');
+const ON_CANCEL = require('./cancel');
+const RequestCancelled = require('./exceptions/RequestCancelled');
+const { logScope } = require('./logger');
 const parse = require('url').parse;
+const format = require('url').format;
 
+const logger = logScope('request');
+const timeoutThreshold = 10 * 1000;
 const translate = (host) => (global.hosts || {})[host] || host;
-
 const create = (url, proxy) =>
 	(((typeof proxy === 'undefined' ? global.proxy : proxy) || url).protocol ===
 	'https:'
@@ -51,33 +56,79 @@ const configure = (method, url, headers, proxy) => {
 	return options;
 };
 
-const request = (method, url, headers, body, proxy) => {
-	url = parse(url);
-	headers = headers || {};
+/**
+ * @typedef {((raw: true) => Promise<Buffer>) | ((raw: false) => Promise<string>)} RequestExtensionBody
+ */
+
+/**
+ * @template T
+ * @typedef {{url: string, body: RequestExtensionBody, json: () => Promise<T>, jsonp: () => Promise<T>}} RequestExtension
+ */
+
+/**
+ * @template T
+ * @param {string} method
+ * @param {string} receivedUrl
+ * @param {Object?} receivedHeaders
+ * @param {unknown?} body
+ * @param {unknown?} proxy
+ * @param {CancelRequest?} cancelRequest
+ * @return {Promise<http.IncomingMessage & RequestExtension<T>>}
+ */
+const request = (
+	method,
+	receivedUrl,
+	receivedHeaders,
+	body,
+	proxy,
+	cancelRequest
+) => {
+	const url = parse(receivedUrl);
+	/* @type {Partial<Record<string,string>>} */
+	const headers = receivedHeaders || {};
 	const options = configure(
 		method,
 		url,
-		Object.assign(
-			{
-				host: url.hostname,
-				accept: 'application/json, text/plain, */*',
-				'accept-encoding': 'gzip, deflate',
-				'accept-language': 'zh-CN,zh;q=0.9',
-				'user-agent':
-					'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36',
-			},
-			headers
-		),
+		{
+			host: url.hostname,
+			accept: 'application/json, text/plain, */*',
+			'accept-encoding': 'gzip, deflate',
+			'accept-language': 'zh-CN,zh;q=0.9',
+			'user-agent':
+				'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36',
+			...headers,
+		},
 		proxy
 	);
 
 	return new Promise((resolve, reject) => {
-		create(
-			url,
-			proxy
-		)(options)
+		logger.debug(`Start requesting ${receivedUrl}`);
+
+		const clientRequest = create(url, proxy)(options);
+		const destroyClientRequest = function () {
+			// We destroy the request and throw RequestCancelled
+			// when the request has been cancelled.
+			clientRequest.destroy(new RequestCancelled(format(url)));
+		};
+
+		cancelRequest?.on(ON_CANCEL, destroyClientRequest);
+		if (cancelRequest?.cancelled ?? false) destroyClientRequest();
+
+		clientRequest
+			.setTimeout(timeoutThreshold, () => {
+				logger.warn(
+					{
+						url: format(url),
+					},
+					`The request timed out, or the requester didn't handle the response.`
+				);
+				destroyClientRequest();
+			})
 			.on('response', (response) => resolve(response))
-			.on('connect', (_, socket) =>
+			.on('connect', (_, socket) => {
+				logger.debug(
+					'received CONNECT, continuing with https.request()...'
+				);
 				https
 					.request({
 						method: method,
@@ -88,27 +139,34 @@ const request = (method, url, headers, body, proxy) => {
 					})
 					.on('response', (response) => resolve(response))
 					.on('error', (error) => reject(error))
-					.end(body)
-			)
+					.end(body);
+			})
 			.on('error', (error) => reject(error))
 			.end(options.method.toUpperCase() === 'CONNECT' ? undefined : body);
-	}).then((response) => {
-		if (new Set([201, 301, 302, 303, 307, 308]).has(response.statusCode))
-			return request(
-				method,
-				url.resolve(response.headers.location || url.href),
-				(delete headers.host, headers),
-				body,
-				proxy
-			);
-		else
+	}).then(
+		/** @param {http.IncomingMessage} response */
+		(response) => {
+			if (cancelRequest?.cancelled ?? false)
+				return Promise.reject(new RequestCancelled(format(url)));
+
+			if ([201, 301, 302, 303, 307, 308].includes(response.statusCode)) {
+				const redirectTo = url.resolve(
+					response.headers.location || url.href
+				);
+
+				logger.debug(`Redirect to ${redirectTo}`);
+				delete headers.host;
+				return request(method, redirectTo, headers, body, proxy);
+			}
+
 			return Object.assign(response, {
-				url: url,
+				url,
 				body: (raw) => read(response, raw),
 				json: () => json(response),
 				jsonp: () => jsonp(response),
 			});
-	});
+		}
+	);
 };
 
 const read = (connect, raw) =>

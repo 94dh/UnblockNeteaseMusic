@@ -8,12 +8,16 @@ on:
             - '**.md'
 
     pull_request:
-        types: [opened, synchronize, reopened]
+        types:
+            - opened
+            - synchronize
+            - reopened
         paths-ignore:
             - '**.md'
 
     release:
-        types: [published]
+        types:
+            - published
 
 jobs:
     build:
@@ -43,10 +47,16 @@ jobs:
                   image: tonistiigi/binfmt:latest
                   platforms: all
 
+            - name: Install dependencies
+              run: yarn
+
+            - name: Make bundle
+              run: yarn build
+
             - name: Building executable file for ${{ matrix.target }}
               run: |
                   npx pkg --compress Brotli -t node14-${{ matrix.target }} .
-                  mv "$(ls dist/*)" "$(ls dist/* | sed 's/music/music-${{ matrix.target }}/g')"
+                  mv "$(ls dist/*)" "$(ls dist/* | sed 's/server/unblockneteasemusic-${{ matrix.target }}/g')"
                   echo "ASSET_NAME=$(ls dist)" >> $GITHUB_ENV
 
             - name: Publishing to GitHub Artifacts

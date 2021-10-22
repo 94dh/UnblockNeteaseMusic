@@ -1,6 +1,6 @@
-const cache = require('../cache');
 const select = require('./select');
 const request = require('../request');
+const { getManagedCacheStorage } = require('../cache');
 
 const track = (info) => {
 	const url =
@@ -12,23 +12,24 @@ const track = (info) => {
 			select.ENABLE_FLAC ? 1 : 2
 		);
 	return request('GET', url)
-		.then((response) => response.body())
-		.then((body) => {
-			// response.body() without raw should
-			// transform the response to string.
-			if (typeof body !== 'string')
-				return Promise.reject(
-					'response.body() returns a value whose type is not string.'
-				);
+		.then((response) => response.json())
+		.then((jsonBody) => {
+			if (
+				jsonBody &&
+				typeof jsonBody === 'object' &&
+				'code' in jsonBody &&
+				jsonBody.code !== 200
+			)
+				return Promise.reject();
 
-			const jsonBody = JSON.parse(body);
 			const matched = jsonBody.data.find((song) => song.id === info.id);
-			if (matched) return matched.url;
+			if (matched && matched.url) return matched.url;
 
 			return Promise.reject();
 		});
 };
 
-const check = (info) => cache(track, info);
+const cs = getManagedCacheStorage('provider/pyncmd');
+const check = (info) => cs.cache(info, () => track(info));
 
 module.exports = { check };

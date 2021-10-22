@@ -1,5 +1,5 @@
-const cache = require('../cache');
 const request = require('../request');
+const { getManagedCacheStorage } = require('../cache');
 
 const filter = (object, keys) =>
 	Object.keys(object).reduce(
@@ -53,16 +53,21 @@ const find = (id, data) => {
 		return request('GET', url)
 			.then((response) => response.json())
 			.then((jsonBody) => {
-				const info = getFormatData(jsonBody.songs[0]);
-				return info.name ? info : Promise.reject();
+				if (jsonBody && jsonBody.songs && jsonBody.songs.length) {
+					const info = getFormatData(jsonBody.songs[0]);
+					return info.name ? info : Promise.reject();
+				}
+				return Promise.reject();
 			});
 	}
 };
+
+const cs = getManagedCacheStorage('provider/find');
 
 module.exports = (id, data) => {
 	if (data) {
 		return find(id, data);
 	} else {
-		return cache(find, id);
+		return cs.cache(id, () => find(id));
 	}
 };
